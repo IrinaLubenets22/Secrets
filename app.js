@@ -9,6 +9,8 @@ const session = require('express-session')
 const app = express();
 const passport = require('passport');
 const passportLocalMongoose = require('passport-local-mongoose');
+const GoogleStrategy = require('passport-google-oauth20').Strategy;
+const findOrCreate = require('mongoose-findorcreate');
 
 
 console.log(process.env.API_KEY)
@@ -32,21 +34,64 @@ mongoose.connect('mongodb://localhost:27017/userDB', { useNewUrlParser: true });
 
 const userSchema = new mongoose.Schema({
 	email: String,
-	password: String
+	password: String,
+	googleId: String
 });
 
 userSchema.plugin(passportLocalMongoose);
+userSchema.plugin(findOrCreate);
 
 
-const User = mongoose.model('User', userSchema);
+const User = mongoose.model("User", userSchema);
 
 passport.use(User.createStrategy());
 passport.serializeUser(User.serializeUser());
 passport.deserializeUser(User.deserializeUser());
 
+passport.use(new GoogleStrategy({
+    clientID: process.env.CLIENT_ID,
+    clientSecret: process.env.CLIENT_SECRET,
+    callbackURL: "http://localhost:3000/auth/google/secrets"
+  },
+  function(accessToken, refreshToken, profile,cb){
+    User.findOne({googleId: profile.id})
+    .then((founduser)=>{
+        if(!founduser){  //if no foundUser , we create one
+          const newUser = new User({
+            username: profile.displayName,
+            googleId: profile.id
+          })
+          newUser.save() //save the User and then send back the newly created user
+          .then(() => {
+            cb(null, newUser)
+          })
+          .catch((err)=>{
+            cb(err)
+          })
+        } else { //if user already exist, just send back the user
+          cb(null, founduser)
+        }
+      })
+      .catch((err)=>{
+        cb(err)
+      })
+    }
+));
+
 app.get("/", function(req, res) {
 	res.render('home');
 });
+
+app.get("/auth/google", 
+	passport.authenticate("google", {scope: ["profile"]})
+);
+
+app.get("/auth/google/secrets", 
+  passport.authenticate("google", { failureRedirect: "/login "}),
+  function(req, res) {
+    // Successful authentication, redirect home.
+    res.redirect("/secrets");
+  });
 
 app.get("/login", function(req, res) {
 	res.render('login');
